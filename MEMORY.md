@@ -15,6 +15,23 @@ Canonical docs (read before coding):
 
 ## Current state
 
+**2026-07-18 (later) — M0–M5 implemented, app boots.**
+- Two commits: benchmark core (`9dc23ea`) and dashboard UI (`747c00f`).
+  100 unit tests green (`uv run pytest tests/units`). `uv run reflex run`
+  compiles and serves /, /analytics, /scenarios, /settings.
+- Stack facts learned: Reflex **0.9.7** — `rx.Base` removed (use plain
+  dataclasses for structured state vars); `rx.Model` needs `sqlmodel`+
+  `alembic` installed and is DEPRECATED in 0.9.2 (works, but plan a move to
+  plain SQLModel before reflex 1.0); tables created via
+  `SQLModel.metadata.create_all(get_engine())` at app import (no alembic).
+- Deviations from PRD recorded: no `scenarios` DB table (suite lives in
+  `observatory/suite/toolcall15.py`; executions store `scenario_key`);
+  trace stored as JSON column on `execution` instead of a trace_events
+  table; heatmap/compact matrix views and mascot asset not built yet (M6).
+- NOT yet tested against a real endpoint — needs user's
+  `TACHIKOMA_LLM_BASE_URL`/`TACHIKOMA_LLM_API_KEY`, then: Settings page →
+  Sync from endpoint → enable models → Start Run on dashboard.
+
 **2026-07-18 — Planning session (no code yet).**
 - Wrote DESIGN.md (from `assets/design-tachikoma.png`, primary mockup; nav icon
   meanings decoded from `assets/design.png` labeled variant) and PRD.md.
