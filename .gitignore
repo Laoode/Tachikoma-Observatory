@@ -65,3 +65,7 @@ reflex.lock
 
 # allow the env template (real .env stays ignored)
 !.env.template
+
+# internal development docs
+MEMORY.md
+PRD.md
