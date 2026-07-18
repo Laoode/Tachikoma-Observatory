@@ -44,5 +44,17 @@ DESIGN.md
 CLAUDE.md
 AGENTS.md
 METHODOLOGY.md
+REFLEX.md
 
 docs/
+
+.claude
+# python / reflex
+__pycache__/
+*.py[cod]
+.venv/
+.web/
+*.db
+*.db-journal
+.states/
+uv.lock
