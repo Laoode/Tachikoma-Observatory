@@ -74,8 +74,8 @@ Each execution is a bounded conversation loop (8 assistant turns max). Blow the 
 Requires Python 3.13+ and [uv](https://docs.astral.sh/uv/). Reflex pulls its own frontend toolchain on first run.
 
 ```bash
-git clone https://github.com/Laoode/ToolBenchAI.git
-cd ToolBenchAI
+git clone https://github.com/Laoode/Tachikoma-Observatory.git
+cd Tachikoma-Observatory
 uv sync
 
 cp .env.template .env   # fill in your endpoint + master key
