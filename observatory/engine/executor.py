@@ -4,16 +4,17 @@ No Reflex imports here — this module must stay UI-agnostic (PRD section 8).
 """
 
 import asyncio
+import datetime
 import json
 import time
 from dataclasses import dataclass, field
 
 from observatory.suite.toolcall15 import (
     GENERIC_MOCKS,
-    SYSTEM_PROMPT,
     TOOL_NAMES,
     TOOLS,
     Scenario,
+    system_prompt_with_context,
 )
 
 MAX_TURNS = 8
@@ -196,7 +197,10 @@ async def _run_conversation(
     """Drive the tool-call loop until a final answer or the turn cap."""
     dispenser = _MockDispenser(scenario)
     messages: list[dict] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "system",
+            "content": system_prompt_with_context(datetime.datetime.now()),
+        },
         {"role": "user", "content": scenario.user_message},
     ]
     _add_event(

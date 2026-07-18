@@ -11,6 +11,7 @@ last entry. Tools without a scenario-specific queue fall back to
 GENERIC_MOCKS so conversations stay natural and deterministic.
 """
 
+import datetime
 from dataclasses import dataclass, field
 
 SUITE_VERSION = "toolcall15-v1.0"
@@ -22,6 +23,24 @@ Rules:
 - If you can answer directly from your own knowledge, do so without calling a tool.
 - If a tool call fails, explain the failure and suggest an alternative approach.
 - Never invent information that a tool should provide."""
+
+
+def system_prompt_with_context(now: datetime.datetime) -> str:
+    """The shared system prompt plus runtime date context.
+
+    METHODOLOGY.md scenarios assume the model knows today's date (TC-05
+    "next Monday", TC-08 "tomorrow at 8am") but the frozen prompt never
+    states it. Real tool-calling deployments always provide the current
+    date, so the harness injects it here; without it, models correctly
+    refuse to guess and every date-relative scenario fails on all models.
+
+    Args:
+        now: The execution start time.
+
+    Returns:
+        System prompt with a trailing current-date line.
+    """
+    return f"{SYSTEM_PROMPT}\n\nCurrent date and time: {now:%A, %Y-%m-%d %H:%M}."
 
 CATEGORIES = {
     "A": "Tool Selection",

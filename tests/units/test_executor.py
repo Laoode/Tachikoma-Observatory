@@ -126,3 +126,16 @@ async def test_token_and_latency_accumulation():
     assert trace.prompt_tokens == 20
     assert trace.completion_tokens == 10
     assert trace.latency_ms == 10
+
+
+async def test_system_prompt_includes_current_date():
+    client = FakeClient([assistant_turn(content="ok")])
+    await execute_scenario(client, "m1", SCENARIOS_BY_KEY["TC-05"])
+    system_message = client.calls[0][1][0]
+    assert system_message["role"] == "system"
+    import datetime
+
+    today = datetime.date.today().isoformat()
+    assert f"Current date and time: {datetime.date.today():%A}, {today}" in (
+        system_message["content"]
+    )
