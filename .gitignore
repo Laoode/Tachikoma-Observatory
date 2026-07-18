@@ -62,3 +62,6 @@ __pycache__/
 .states/
 uv.lock
 reflex.lock
+
+# allow the env template (real .env stays ignored)
+!.env.template

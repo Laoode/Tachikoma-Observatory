@@ -8,8 +8,13 @@ offline), so loading is lazy: `load_llm_config` returns None when unset and
 import os
 from dataclasses import dataclass
 
+from dotenv import load_dotenv
+
 ENV_BASE_URL = "TACHIKOMA_LLM_BASE_URL"
 ENV_API_KEY = "TACHIKOMA_LLM_API_KEY"
+
+# Values from a repo-root .env (see .env.template); real environment wins.
+load_dotenv(override=False)
 
 
 @dataclass(frozen=True)
