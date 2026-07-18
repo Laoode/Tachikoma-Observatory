@@ -14,18 +14,49 @@ from observatory.state.structs import TraceRow
 from observatory.theme import tokens as t
 
 
-def _framed(title: str, body: rx.Component, border_color: str = t.BORDER_SOFT) -> rx.Component:
+# macOS-style neutral glass card: hairline border + soft inner top light,
+# no colored accent stripes (status is conveyed by the outcome badge only).
+CARD_STYLE = {
+    "background": "rgba(255,255,255,0.04)",
+    "border": "1px solid rgba(255,255,255,0.08)",
+    "border_radius": "10px",
+    "box_shadow": "inset 0 1px 0 rgba(255,255,255,0.06)",
+    "backdrop_filter": "blur(20px) saturate(1.4)",
+    "padding": "10px 12px",
+    "width": "100%",
+}
+
+# Descendant styling for model-authored markdown so it matches the panel.
+MARKDOWN_STYLE = {
+    "font_size": "13px",
+    "color": t.TEXT_PRIMARY,
+    "& p": {"margin": "0 0 6px 0", "line_height": "1.5"},
+    "& p:last-child": {"margin_bottom": "0"},
+    "& strong": {"color": t.TEXT_PRIMARY, "font_weight": "600"},
+    "& ul, & ol": {"margin": "4px 0", "padding_left": "18px"},
+    "& li": {"margin": "2px 0"},
+    "& code": {
+        "font_family": t.FONT_MONO,
+        "font_size": "12px",
+        "background": "rgba(255,255,255,0.06)",
+        "border_radius": "4px",
+        "padding": "1px 4px",
+    },
+}
+
+
+def _framed(title: str, body: rx.Component) -> rx.Component:
     """Titled sub-block inside the detail panel."""
     return rx.box(
         caption(title, margin_bottom="6px"),
         body,
-        background=t.SURFACE_2,
-        border=f"1px solid {t.BORDER_SOFT}",
-        border_left=f"2px solid {border_color}",
-        border_radius=t.RADIUS_CONTROL,
-        padding="10px 12px",
-        width="100%",
+        style=CARD_STYLE,
     )
+
+
+def _model_markdown(text: rx.Var) -> rx.Component:
+    """Model-authored text rendered as markdown."""
+    return rx.box(rx.markdown(text), style=MARKDOWN_STYLE)
 
 
 def _trace_node(event: TraceRow) -> rx.Component:
@@ -64,7 +95,7 @@ def _trace_node(event: TraceRow) -> rx.Component:
             ),
             rx.fragment(),
         ),
-        border_left=f"1px solid {t.BORDER_SOFT}",
+        border_left="1px solid rgba(255,255,255,0.08)",
         padding="6px 0 6px 10px",
         margin_left="6px",
         width="100%",
@@ -94,19 +125,9 @@ def _overview_tab() -> rx.Component:
                     color=t.TEXT_SECONDARY,
                     font_style="italic",
                 ),
-                rx.text(
-                    RunState.detail.final_answer,
-                    font_size="13px",
-                    color=t.TEXT_PRIMARY,
-                ),
+                _model_markdown(RunState.detail.final_answer),
                 spacing="2",
                 align="start",
-            ),
-            border_color=rx.match(
-                RunState.detail.status,
-                ("pass", t.STATUS_PASS),
-                ("half", t.STATUS_HALF),
-                t.STATUS_FAIL,
             ),
         ),
         caption("Tool Call Trace", margin_top="8px"),
@@ -135,11 +156,7 @@ def _trace_tab() -> rx.Component:
                         white_space="pre-wrap",
                         margin="0",
                     ),
-                    background=t.SURFACE_2,
-                    border_radius=t.RADIUS_CONTROL,
-                    padding="8px",
-                    margin_left="16px",
-                    width="100%",
+                    style={**CARD_STYLE, "padding": "8px", "margin_left": "16px"},
                 ),
                 spacing="1",
                 width="100%",
@@ -176,12 +193,12 @@ def _logs_tab() -> rx.Component:
             white_space="pre-wrap",
             margin="0",
         ),
-        background=t.SURFACE_2,
-        border_radius=t.RADIUS_CONTROL,
-        padding="10px",
-        max_height="400px",
-        overflow_y="auto",
-        width="100%",
+        style={
+            **CARD_STYLE,
+            "padding": "10px",
+            "max_height": "400px",
+            "overflow_y": "auto",
+        },
     )
 
 
