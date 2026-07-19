@@ -433,9 +433,6 @@ class RunState(rx.State):
             for s in SCENARIOS
         ]
         self._apply_running_cells()
-        if not self.is_running:
-            self.done_cells = len(by_cell)
-            self.total_cells = len(ordered_ids) * len(SCENARIOS)
         self._refresh_views(executions)
         self.last_updated = datetime.datetime.now().strftime("%H:%M:%S")
 
@@ -495,6 +492,11 @@ class RunState(rx.State):
             invalid_json_rate=f"{agg.invalid_json_rate}%",
             loop_rate=f"{agg.loop_rate}%",
         )
+        # Idle progress tracks the focused model (0% for a model never
+        # benchmarked); during a run the run-scoped counters take over.
+        if not self.is_running:
+            self.done_cells = agg.executed
+            self.total_cells = len(SCENARIOS)
         self._refresh_charts(executions, focus)
 
     def _refresh_charts(self, executions: list[Execution], focus: str):
