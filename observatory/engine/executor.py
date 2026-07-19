@@ -14,6 +14,7 @@ from observatory.suite.toolcall15 import (
     TOOL_NAMES,
     TOOLS,
     Scenario,
+    calculator_result,
     system_prompt_with_context,
 )
 
@@ -143,20 +144,23 @@ class _MockDispenser:
         """
         self._queues = {name: list(queue) for name, queue in scenario.mocks.items()}
 
-    def next_result(self, tool_name: str) -> dict:
+    def next_result(self, tool_name: str, arguments: dict | None) -> dict:
         """Mocked result for a tool call.
 
         Args:
             tool_name: The tool the model called.
+            arguments: Parsed call arguments (None when JSON parsing failed).
 
         Returns:
             Next queued response (exhausted queues repeat the last entry);
-            generic fallback for unscripted tools; an error payload for
-            unknown tool names.
+            generic fallback for unscripted tools (the calculator evaluates
+            its expression for real); an error payload for unknown tools.
         """
         queue = self._queues.get(tool_name)
         if queue:
             return queue.pop(0) if len(queue) > 1 else queue[0]
+        if tool_name == "calculator":
+            return calculator_result(str((arguments or {}).get("expression", "")))
         if tool_name in GENERIC_MOCKS:
             return GENERIC_MOCKS[tool_name]
         return {"error": f"Unknown tool: {tool_name}"}
@@ -263,7 +267,7 @@ def _record_tool_call(
         parse_error = f"Invalid JSON arguments: {exc}"
 
     is_known = name in TOOL_NAMES
-    mock_result = dispenser.next_result(name)
+    mock_result = dispenser.next_result(name, arguments)
     record = ToolCallRecord(
         turn=trace.turn_count,
         name=name,

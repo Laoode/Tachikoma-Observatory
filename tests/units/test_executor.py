@@ -139,3 +139,31 @@ async def test_system_prompt_includes_current_date():
     assert f"Current date and time: {datetime.date.today():%A}, {today}" in (
         system_message["content"]
     )
+
+
+async def test_unscripted_calculator_evaluates_expression():
+    client = FakeClient(
+        [
+            assistant_turn(
+                tool_calls=[tool_call("calculator", {"expression": "0.15 * 200"})]
+            ),
+            assistant_turn(content="15% of 200 is 30."),
+        ]
+    )
+    trace = await execute_scenario(client, "m1", SCENARIOS_BY_KEY["TC-11"])
+    assert trace.tool_calls[0].mock_result == {"result": 30.0}
+
+
+async def test_unscripted_calculator_rejects_non_arithmetic():
+    client = FakeClient(
+        [
+            assistant_turn(
+                tool_calls=[
+                    tool_call("calculator", {"expression": "__import__('os')"})
+                ]
+            ),
+            assistant_turn(content="done"),
+        ]
+    )
+    trace = await execute_scenario(client, "m1", SCENARIOS_BY_KEY["TC-11"])
+    assert "error" in trace.tool_calls[0].mock_result

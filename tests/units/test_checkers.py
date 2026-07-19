@@ -364,3 +364,42 @@ def test_every_checker_returns_valid_result(key):
     assert result.points in (FULL, HALF, FAIL)
     assert result.label in ("pass", "half", "fail")
     assert result.verdict
+
+
+class TestAuditRegressions:
+    def test_tc08_1800_is_not_0800(self):
+        calls = [
+            ("get_weather", {"location": "Paris"}),
+            ("set_reminder", {"message": "Bring an umbrella",
+                              "datetime": "2026-07-20T18:00:00"}),
+        ]
+        assert points("TC-08", calls) == HALF
+
+    def test_tc08_unpadded_8am_passes(self):
+        calls = [
+            ("get_weather", {"location": "Paris"}),
+            ("set_reminder", {"message": "Bring an umbrella",
+                              "datetime": "2026-07-20 8:00"}),
+        ]
+        assert points("TC-08", calls) == FULL
+
+    def test_tc05_duration_as_string_is_accepted(self):
+        calls = [
+            (
+                "create_calendar_event",
+                {
+                    "title": "Standup",
+                    "date": next_monday_str(),
+                    "time": "09:30",
+                    "duration_minutes": "30",
+                    "attendees": ["Alex", "Jamie"],
+                },
+            )
+        ]
+        assert points("TC-05", calls) == FULL
+
+    def test_tc11_300_is_not_the_answer(self):
+        assert points("TC-11", [], final="It is 300.") == FAIL
+
+    def test_tc11_decimal_30_passes(self):
+        assert points("TC-11", [], final="The answer is 30.") == FULL

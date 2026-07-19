@@ -9,6 +9,7 @@ LLM-judge may refine these later.
 """
 
 import datetime
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -163,7 +164,10 @@ def _check_tc05(t: ExecutionTrace) -> ScoreResult:
     attendees = _args(call).get("attendees") or []
     attendees_text = " ".join(str(a).lower() for a in attendees)
     attendees_ok = "alex" in attendees_text and "jamie" in attendees_text
-    duration_ok = _args(call).get("duration_minutes") == 30
+    try:
+        duration_ok = int(_args(call).get("duration_minutes", 0)) == 30
+    except (TypeError, ValueError):
+        duration_ok = False
     if attendees_ok and duration_ok:
         return ScoreResult(FULL, "Correct date, time, duration and attendees")
     return ScoreResult(
@@ -248,7 +252,8 @@ def _check_tc08(t: ExecutionTrace) -> ScoreResult:
         )
     reminder = t.calls_of("set_reminder")[0]
     when = _arg(reminder, "datetime")
-    time_ok = "08:00" in when or "t08" in when or "8:00" in when
+    # Word-anchored so 18:00 does not pass as 8:00.
+    time_ok = "08:00" in when or bool(re.search(r"(^|[t\s])8:00", when))
     message_ok = "umbrella" in _arg(reminder, "message")
     if time_ok and message_ok:
         return ScoreResult(FULL, "Conditional chain with correct reminder")
@@ -286,7 +291,8 @@ def _check_tc10(t: ExecutionTrace) -> ScoreResult:
 
 def _check_tc11(t: ExecutionTrace) -> ScoreResult:
     """15% of 200: direct answer, calculator is a crutch."""
-    correct = "30" in _final(t)
+    # Word-anchored so 130 or 300 do not count as the answer 30.
+    correct = re.search(r"\b30\b", _final(t)) is not None
     if not t.tool_calls:
         if correct:
             return ScoreResult(FULL, "Answered 30 directly")

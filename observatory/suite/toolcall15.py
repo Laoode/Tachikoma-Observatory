@@ -11,7 +11,9 @@ last entry. Tools without a scenario-specific queue fall back to
 GENERIC_MOCKS so conversations stay natural and deterministic.
 """
 
+import ast
 import datetime
+import operator
 from dataclasses import dataclass, field
 
 SUITE_VERSION = "toolcall15-v1.0"
@@ -206,7 +208,57 @@ TOOL_NAMES: frozenset[str] = frozenset(
     t["function"]["name"] for t in TOOLS
 )
 
+_CALC_OPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.Pow: operator.pow,
+    ast.Mod: operator.mod,
+    ast.USub: operator.neg,
+    ast.UAdd: operator.pos,
+}
+
+
+def _eval_arithmetic(node) -> float:
+    """Evaluate a numeric AST node using only whitelisted operators.
+
+    Raises:
+        ValueError: For any non-arithmetic construct.
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return node.value
+    if isinstance(node, ast.BinOp) and type(node.op) in _CALC_OPS:
+        return _CALC_OPS[type(node.op)](
+            _eval_arithmetic(node.left), _eval_arithmetic(node.right)
+        )
+    if isinstance(node, ast.UnaryOp) and type(node.op) in _CALC_OPS:
+        return _CALC_OPS[type(node.op)](_eval_arithmetic(node.operand))
+    raise ValueError("unsupported expression")
+
+
+def calculator_result(expression: str) -> dict:
+    """Real arithmetic for unscripted calculator calls.
+
+    A static mock (previously {"result": 0}) contradicts the expression the
+    model sent and punishes models that trust their tools; evaluating keeps
+    the environment deterministic AND truthful.
+
+    Args:
+        expression: The expression argument from the tool call.
+
+    Returns:
+        {"result": value} or an error payload for non-arithmetic input.
+    """
+    try:
+        node = ast.parse(expression.replace(",", ""), mode="eval").body
+        return {"result": round(_eval_arithmetic(node), 6)}
+    except Exception:
+        return {"error": f"Could not evaluate expression: {expression!r}"}
+
+
 # Deterministic fallbacks for tools called outside their scenario's script.
+# The calculator is special-cased in the executor via calculator_result().
 GENERIC_MOCKS: dict[str, dict] = {
     "web_search": {
         "results": [

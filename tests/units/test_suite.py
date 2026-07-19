@@ -46,3 +46,13 @@ def test_scenario_keys_are_ordered_and_unique():
 def test_difficulties_are_valid():
     for scenario in SCENARIOS:
         assert scenario.difficulty in ("easy", "medium", "hard"), scenario.key
+
+
+def test_calculator_result_evaluates_common_forms():
+    from observatory.suite.toolcall15 import calculator_result
+
+    assert calculator_result("0.15 * 200") == {"result": 30.0}
+    assert calculator_result("372,520 * 0.02") == {"result": 7450.4}
+    assert calculator_result("-(2 + 3) ** 2") == {"result": -25}
+    assert "error" in calculator_result("import os")
+    assert "error" in calculator_result("")
