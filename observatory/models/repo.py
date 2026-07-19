@@ -72,6 +72,42 @@ def set_model_enabled(entry_id: int, is_enabled: bool) -> None:
             session.commit()
 
 
+def set_model_no_think(entry_id: int, mode: str) -> None:
+    """Set a model's reasoning-suppression mode (none / vllm / groq)."""
+    with rx.session() as session:
+        entry = session.get(ModelEntry, entry_id)
+        if entry is not None:
+            entry.no_think = mode
+            session.add(entry)
+            session.commit()
+
+
+def delete_model(entry_id: int) -> str:
+    """Delete a model and its entire benchmark history.
+
+    Args:
+        entry_id: Registry row ID.
+
+    Returns:
+        The deleted model's display name, empty if the entry was missing.
+        Destructive: all executions (matrix column, traces, analytics
+        contributions) for the model are removed. Run rows are kept.
+    """
+    with rx.session() as session:
+        entry = session.get(ModelEntry, entry_id)
+        if entry is None:
+            return ""
+        executions = session.exec(
+            select(Execution).where(Execution.model_id == entry.model_id)
+        ).all()
+        for execution in executions:
+            session.delete(execution)
+        name = entry.display_name
+        session.delete(entry)
+        session.commit()
+    return name
+
+
 def create_run(model_ids: list[str]) -> int:
     """Insert a new running BenchRun and return its ID."""
     with rx.session() as session:

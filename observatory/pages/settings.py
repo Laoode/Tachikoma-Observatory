@@ -83,6 +83,62 @@ def _registry_row(row: RegistryRow) -> rx.Component:
                 ),
             )
         ),
+        rx.table.cell(
+            rx.tooltip(
+                rx.select(
+                    ["none", "vllm", "groq"],
+                    value=row.no_think,
+                    on_change=lambda value: SettingsState.set_no_think(
+                        row.entry_id, value
+                    ),
+                    size="1",
+                ),
+                content=(
+                    "Reasoning suppression sent with every request: "
+                    "vllm = chat_template_kwargs.enable_thinking=false, "
+                    "groq = reasoning_effort=none, "
+                    "none = endpoint already configured server-side"
+                ),
+            )
+        ),
+        rx.table.cell(_delete_dialog(row)),
+    )
+
+
+def _delete_dialog(row: RegistryRow) -> rx.Component:
+    """Trash button with a confirmation dialog."""
+    return rx.alert_dialog.root(
+        rx.alert_dialog.trigger(
+            rx.icon_button(
+                rx.icon("trash_2", size=14),
+                background="transparent",
+                border=f"1px solid {t.BORDER_SOFT}",
+                color=t.STATUS_FAIL,
+                cursor="pointer",
+                _hover={"background": "rgba(248,113,113,0.1)"},
+            )
+        ),
+        rx.alert_dialog.content(
+            rx.alert_dialog.title(f"Delete {row.name}?"),
+            rx.alert_dialog.description(
+                "This removes the model and its entire benchmark history: "
+                "matrix column, traces, and analytics contributions. "
+                "This cannot be undone."
+            ),
+            rx.flex(
+                rx.alert_dialog.cancel(rx.button("Cancel", variant="soft")),
+                rx.alert_dialog.action(
+                    rx.button(
+                        "Delete",
+                        color_scheme="red",
+                        on_click=SettingsState.delete_model(row.entry_id),
+                    )
+                ),
+                spacing="3",
+                justify="end",
+                margin_top="16px",
+            ),
+        ),
     )
 
 
@@ -124,7 +180,9 @@ def registry_panel() -> rx.Component:
                                     color=t.TEXT_MUTED,
                                 )
                             )
-                            for h in ["Model", "ID", "Status", "Enabled"]
+                            for h in [
+                            "Model", "ID", "Status", "Enabled", "No-Think", "",
+                        ]
                         ]
                     )
                 ),

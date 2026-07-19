@@ -27,7 +27,23 @@ def _create_tables() -> None:
     SQLModel.metadata.create_all(get_engine())
 
 
+def _ensure_columns() -> None:
+    """Additive schema upgrades for existing SQLite databases (no alembic)."""
+    with get_engine().connect() as conn:
+        columns = {
+            row[1]
+            for row in conn.exec_driver_sql("PRAGMA table_info(modelentry)")
+        }
+        if "no_think" not in columns:
+            conn.exec_driver_sql(
+                "ALTER TABLE modelentry "
+                "ADD COLUMN no_think TEXT NOT NULL DEFAULT 'none'"
+            )
+        conn.commit()
+
+
 _create_tables()
+_ensure_columns()
 
 app = rx.App(
     style=GLOBAL_STYLE,

@@ -56,6 +56,22 @@ class SettingsState(rx.State):
         repo.set_model_enabled(entry_id, value)
         self._reload_registry()
 
+    @rx.event
+    def set_no_think(self, entry_id: int, value: str):
+        """Set the reasoning-suppression payload sent for this model."""
+        repo.set_model_no_think(entry_id, value)
+        self._reload_registry()
+
+    @rx.event
+    def delete_model(self, entry_id: int):
+        """Delete a model and all its benchmark history (confirmed in UI)."""
+        name = repo.delete_model(entry_id)
+        self._reload_registry()
+        if name:
+            return rx.toast.success(
+                f"Deleted {name} and its benchmark history."
+            )
+
     def _reload_registry(self):
         """Refresh registry rows from the DB."""
         self.registry = [
@@ -66,6 +82,7 @@ class SettingsState(rx.State):
                 color=e.color,
                 is_enabled=e.is_enabled,
                 is_active=e.is_active,
+                no_think=e.no_think,
             )
             for e in repo.list_models()
         ]

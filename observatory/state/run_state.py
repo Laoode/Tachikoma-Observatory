@@ -14,7 +14,7 @@ import reflex as rx
 from observatory.config import load_llm_config
 from observatory.engine.executor import execute_scenario
 from observatory.engine.runner import RunEvent, run_benchmark
-from observatory.llm.client import LLMClient
+from observatory.llm.client import NO_THINK_EXTRAS, LLMClient
 from observatory.models import repo
 from observatory.models.tables import Execution
 from observatory.scoring.aggregate import ExecutionSummary, aggregate_model
@@ -58,6 +58,15 @@ ERROR_CHART_COLORS = {
 # Process-local stop flags; background tasks cannot mutate state outside
 # `async with self`, so graceful stop is signalled out-of-band per run.
 _STOP_FLAGS: dict[int, bool] = {}
+
+
+def _no_think_extras(entries) -> dict[str, dict]:
+    """Per-model no-think request payloads for the given registry entries."""
+    return {
+        e.model_id: NO_THINK_EXTRAS[e.no_think]
+        for e in entries
+        if NO_THINK_EXTRAS.get(e.no_think)
+    }
 
 
 def _status_of(execution: Execution) -> str:
@@ -296,7 +305,7 @@ class RunState(rx.State):
             self.total_cells = len(model_ids) * len(SCENARIOS)
             self._rebuild()
 
-        client = LLMClient(config)
+        client = LLMClient(config, model_extras=_no_think_extras(targets))
         state_ref = self
 
         async def on_event(event: RunEvent):
@@ -357,7 +366,8 @@ class RunState(rx.State):
         async with self:
             self._running_cells = [*self._running_cells, cell_key]
             self._apply_running_cells()
-        client = LLMClient(config)
+        entries = [e for e in repo.list_models() if e.model_id == model_id]
+        client = LLMClient(config, model_extras=_no_think_extras(entries))
         trace = await execute_scenario(
             client, model_id, SCENARIOS_BY_KEY[scenario_key]
         )

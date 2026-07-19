@@ -15,6 +15,7 @@ class ModelEntry(rx.Model, table=True):
     color: str = ""
     is_enabled: bool = True
     is_active: bool = True
+    no_think: str = "none"
     created_at: str = ""
 
 

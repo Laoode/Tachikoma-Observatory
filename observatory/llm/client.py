@@ -9,6 +9,16 @@ from observatory.config import LLMConfig
 
 REQUEST_TIMEOUT_S = 90.0
 
+# Per-provider request payloads that disable reasoning/thinking tokens.
+# The benchmark measures non-thinking tool use across every endpoint, but
+# OpenAI-compatible servers spell that differently; the mode is configured
+# per model in the registry (Settings page).
+NO_THINK_EXTRAS: dict[str, dict] = {
+    "none": {},
+    "vllm": {"chat_template_kwargs": {"enable_thinking": False}},
+    "groq": {"reasoning_effort": "none"},
+}
+
 
 @dataclass(frozen=True)
 class ChatResult:
@@ -38,9 +48,12 @@ class LLMClient:
 
     Args:
         config: Endpoint base URL and master key.
+        model_extras: Optional per-model extra JSON body merged into every
+            chat request for that model (e.g. NO_THINK_EXTRAS payloads).
     """
 
     config: LLMConfig
+    model_extras: dict[str, dict] = field(default_factory=dict)
     _client: AsyncOpenAI = field(init=False, repr=False)
 
     def __post_init__(self):
@@ -80,6 +93,7 @@ class LLMClient:
             tools=tools,
             tool_choice="auto",
             temperature=0.0,
+            extra_body=self.model_extras.get(model) or None,
         )
         latency_ms = int((time.monotonic() - started) * 1000)
         usage = response.usage
