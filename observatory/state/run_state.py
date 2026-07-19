@@ -127,23 +127,8 @@ class RunState(rx.State):
             "error": "Error",
         }.get(self.run_status, "Idle")
 
-    @rx.var
-    def target_options(self) -> list[str]:
-        """Model select: run-all plus every registered model ever."""
-        options = [ALL_MODELS]
-        for entry in repo.list_models():
-            suffix = "" if entry.is_active else INACTIVE_SUFFIX
-            options.append(f"{entry.display_name}{suffix}")
-        return options
-
-    @rx.var
-    def can_run(self) -> bool:
-        """Whether the Start Run button is enabled for the current target."""
-        entries = repo.list_models()
-        if self.target == ALL_MODELS:
-            return any(e.is_enabled and e.is_active for e in entries)
-        entry = self._target_entry(entries)
-        return entry is not None and entry.is_active
+    target_options: list[str] = [ALL_MODELS]
+    can_run: bool = False
 
     @rx.var
     def filtered_rows(self) -> list[Row]:
@@ -215,7 +200,32 @@ class RunState(rx.State):
     def set_target(self, value: str):
         """Switch the run target / KPI focus."""
         self.target = value
+        self._update_run_gate(repo.list_models())
         self._refresh_views()
+
+    def _update_run_gate(self, entries) -> None:
+        """Recompute Start Run availability for the current target."""
+        if self.target == ALL_MODELS:
+            self.can_run = any(e.is_enabled and e.is_active for e in entries)
+        else:
+            entry = self._target_entry(entries)
+            self.can_run = entry is not None and entry.is_active
+
+    def _refresh_target_options(self, entries) -> None:
+        """Rebuild the Model select from the registry; the select is a plain
+        state var because computed vars cannot observe DB changes made from
+        the Settings page."""
+        labels = {
+            e.display_name: f"{e.display_name}"
+            + ("" if e.is_active else INACTIVE_SUFFIX)
+            for e in entries
+        }
+        self.target_options = [ALL_MODELS, *labels.values()]
+        # An active model can turn inactive between syncs (or vice versa);
+        # re-point the current selection at its updated label.
+        if self.target != ALL_MODELS and self.target not in self.target_options:
+            name = self.target.removesuffix(INACTIVE_SUFFIX)
+            self.target = labels.get(name, ALL_MODELS)
 
     @rx.event
     def stop_run(self):
@@ -379,7 +389,10 @@ class RunState(rx.State):
         in-flight run participants that have no results yet (appended right).
         """
         executions = repo.latest_executions_all()
-        registry = {e.model_id: e for e in repo.list_models()}
+        entries = repo.list_models()
+        registry = {e.model_id: e for e in entries}
+        self._refresh_target_options(entries)
+        self._update_run_gate(entries)
 
         first_seen: dict[str, int] = {}
         for execution in sorted(executions, key=lambda e: e.id):
