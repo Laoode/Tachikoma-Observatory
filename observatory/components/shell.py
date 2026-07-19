@@ -136,16 +136,29 @@ def _run_button() -> rx.Component:
             cursor="pointer",
             _hover={"background": t.SURFACE_3, "box_shadow": t.ACCENT_GLOW},
         ),
-        rx.button(
-            rx.icon("play", size=14),
-            "Start Run",
-            on_click=RunState.start_run,
-            background=t.ACCENT,
-            color="#06130A",
-            font_weight="600",
-            border_radius=t.RADIUS_CONTROL,
-            cursor="pointer",
-            _hover={"box_shadow": t.ACCENT_GLOW},
+        rx.tooltip(
+            rx.button(
+                rx.icon("play", size=14),
+                "Start Run",
+                on_click=RunState.start_run,
+                disabled=~RunState.can_run,
+                background=t.ACCENT,
+                color="#06130A",
+                font_weight="600",
+                border_radius=t.RADIUS_CONTROL,
+                cursor="pointer",
+                _hover={"box_shadow": t.ACCENT_GLOW},
+                _disabled={
+                    "background": t.SURFACE_3,
+                    "color": t.TEXT_MUTED,
+                    "cursor": "not-allowed",
+                },
+            ),
+            content=rx.cond(
+                RunState.can_run,
+                "Run the selected target",
+                "Selected model is inactive on the current endpoint",
+            ),
         ),
     )
 
@@ -178,23 +191,12 @@ def header() -> rx.Component:
         rx.spacer(),
         rx.hstack(
             rx.vstack(
-                rx.text("Run History", font_size="10px", color=t.TEXT_MUTED),
+                rx.text("Model", font_size="10px", color=t.TEXT_MUTED),
                 rx.select(
-                    RunState.run_options,
-                    value=RunState.selected_run,
-                    on_change=RunState.select_run,
+                    RunState.target_options,
+                    value=RunState.target,
+                    on_change=RunState.set_target,
                     disabled=RunState.is_running,
-                    size="1",
-                ),
-                spacing="0",
-                align="start",
-            ),
-            rx.vstack(
-                rx.text("Focused Model", font_size="10px", color=t.TEXT_MUTED),
-                rx.select(
-                    RunState.focused_options,
-                    value=RunState.focused_name,
-                    on_change=RunState.set_focused,
                     size="1",
                 ),
                 spacing="0",

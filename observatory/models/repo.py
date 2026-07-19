@@ -146,6 +146,20 @@ def latest_executions(run_id: int) -> list[Execution]:
     return list(latest.values())
 
 
+def latest_executions_all() -> list[Execution]:
+    """Global latest execution per (model, scenario) across every run.
+
+    Returns:
+        One execution per cell, newest wins (insertion order = recency).
+    """
+    with rx.session() as session:
+        rows = session.exec(select(Execution).order_by(Execution.id)).all()
+    latest: dict[tuple[str, str], Execution] = {}
+    for row in rows:
+        latest[(row.model_id, row.scenario_key)] = row
+    return list(latest.values())
+
+
 def list_runs(limit: int = 50) -> list[BenchRun]:
     """Most recent runs, newest first."""
     with rx.session() as session:

@@ -1,6 +1,11 @@
-"""Dashboard state: run control, live matrix, KPIs, charts, detail panel."""
+"""Dashboard state, model-centric: one merged matrix of every benchmarked
+model (latest result per cell across all runs), one target select that both
+picks what to run and which model the KPI cards focus on.
 
-import asyncio
+Runs still exist as DB rows underneath (analytics, history, attempt
+grouping); the dashboard just presents the merged latest-per-model view.
+"""
+
 import datetime
 import json
 
@@ -24,6 +29,9 @@ from observatory.state.structs import (
     fmt_compact,
 )
 from observatory.suite.toolcall15 import CATEGORIES, SCENARIOS, SCENARIOS_BY_KEY
+
+ALL_MODELS = "All Active Models"
+INACTIVE_SUFFIX = " (inactive)"
 
 ERROR_LABELS = {
     "invalid_tool": "Invalid Tool",
@@ -52,12 +60,6 @@ ERROR_CHART_COLORS = {
 _STOP_FLAGS: dict[int, bool] = {}
 
 
-def _run_label(run) -> str:
-    """Compact run-history option label, e.g. '#2 · 07-19 20:17 · complete'."""
-    when = run.started_at[5:16].replace("T", " ")
-    return f"#{run.id} · {when} · {run.status}"
-
-
 def _status_of(execution: Execution) -> str:
     """Matrix cell status for a stored execution."""
     if execution.status == "error":
@@ -65,19 +67,29 @@ def _status_of(execution: Execution) -> str:
     return {2: "pass", 1: "half", 0: "fail"}[execution.points]
 
 
+def _summary_of(execution: Execution) -> ExecutionSummary:
+    """Aggregation input from a stored execution."""
+    return ExecutionSummary(
+        scenario_key=execution.scenario_key,
+        points=execution.points,
+        error_tags=tuple(execution.error_tags),
+        tool_call_count=execution.tool_call_count,
+        prompt_tokens=execution.prompt_tokens,
+        completion_tokens=execution.completion_tokens,
+        latency_ms=execution.latency_ms,
+    )
+
+
 class RunState(rx.State):
     """Everything the dashboard page renders and controls."""
 
     run_status: str = "idle"
     run_id: int = 0
-    run_options: list[str] = []
-    selected_run: str = ""
-    _run_ids: dict[str, int] = {}
     cols: list[ModelCol] = []
     rows: list[Row] = []
     done_cells: int = 0
     total_cells: int = 0
-    focused_model: str = ""
+    target: str = ALL_MODELS
     kpi: Kpi = Kpi()
     detail: Detail = Detail()
     search: str = ""
@@ -88,10 +100,13 @@ class RunState(rx.State):
     spark_data: list[dict] = []
     last_updated: str = "—"
     endpoint_ok: bool = False
+    _running_cells: list[str] = []
+    _run_model_ids: list[str] = []
+    _detail_model_id: str = ""
 
     @rx.var
     def progress_pct(self) -> int:
-        """Run completion percentage for the header bar."""
+        """Completion percentage: in-flight run while running, else merged."""
         if self.total_cells == 0:
             return 0
         return int(self.done_cells / self.total_cells * 100)
@@ -113,17 +128,22 @@ class RunState(rx.State):
         }.get(self.run_status, "Idle")
 
     @rx.var
-    def focused_options(self) -> list[str]:
-        """Model names for the Current Run select."""
-        return [c.name for c in self.cols]
+    def target_options(self) -> list[str]:
+        """Model select: run-all plus every registered model ever."""
+        options = [ALL_MODELS]
+        for entry in repo.list_models():
+            suffix = "" if entry.is_active else INACTIVE_SUFFIX
+            options.append(f"{entry.display_name}{suffix}")
+        return options
 
     @rx.var
-    def focused_name(self) -> str:
-        """Display name of the focused model."""
-        for c in self.cols:
-            if c.model_id == self.focused_model:
-                return c.name
-        return ""
+    def can_run(self) -> bool:
+        """Whether the Start Run button is enabled for the current target."""
+        entries = repo.list_models()
+        if self.target == ALL_MODELS:
+            return any(e.is_enabled and e.is_active for e in entries)
+        entry = self._target_entry(entries)
+        return entry is not None and entry.is_active
 
     @rx.var
     def filtered_rows(self) -> list[Row]:
@@ -144,39 +164,28 @@ class RunState(rx.State):
         """Category filter choices."""
         return ["All Categories", *CATEGORIES.values()]
 
+    def _target_entry(self, entries=None):
+        """Registry entry matching the selected target, None for run-all."""
+        if self.target == ALL_MODELS:
+            return None
+        name = self.target.removesuffix(INACTIVE_SUFFIX)
+        for entry in entries if entries is not None else repo.list_models():
+            if entry.display_name == name:
+                return entry
+        return None
+
+    def _focus_model_id(self) -> str:
+        """Model the KPI cards focus on: the target, else the newest column."""
+        entry = self._target_entry()
+        if entry is not None:
+            return entry.model_id
+        return self.cols[-1].model_id if self.cols else ""
+
     @rx.event
     def load_dashboard(self):
-        """Page on_load: restore the latest run and ping the endpoint."""
-        self._refresh_run_options()
-        run = repo.latest_run()
-        if run is not None:
-            self._show_run(run)
-        self.last_updated = datetime.datetime.now().strftime("%H:%M:%S")
+        """Page on_load: build the merged view and ping the endpoint."""
+        self._rebuild()
         return RunState.ping_endpoint
-
-    @rx.event
-    def select_run(self, label: str):
-        """Load a historical run into the dashboard (disabled while running)."""
-        if self.is_running:
-            return
-        run = repo.get_run(self._run_ids.get(label, 0))
-        if run is None:
-            return
-        self.detail = Detail()
-        self._show_run(run)
-
-    def _show_run(self, run) -> None:
-        """Point the dashboard at one run."""
-        self.run_id = run.id
-        self.run_status = run.status
-        self.selected_run = _run_label(run)
-        self._load_run(run.id, run.model_ids)
-
-    def _refresh_run_options(self) -> None:
-        """Rebuild the run-history select options, newest first."""
-        runs = repo.list_runs()
-        self._run_ids = {_run_label(r): r.id for r in runs}
-        self.run_options = list(self._run_ids)
 
     @rx.event(background=True)
     async def ping_endpoint(self):
@@ -203,11 +212,9 @@ class RunState(rx.State):
         self.category_filter = value
 
     @rx.event
-    def set_focused(self, name: str):
-        """Switch the model the KPI cards focus on."""
-        for c in self.cols:
-            if c.name == name:
-                self.focused_model = c.model_id
+    def set_target(self, value: str):
+        """Switch the run target / KPI focus."""
+        self.target = value
         self._refresh_views()
 
     @rx.event
@@ -227,7 +234,7 @@ class RunState(rx.State):
 
     @rx.event
     def export_csv(self):
-        """Download the current matrix as CSV."""
+        """Download the merged matrix as CSV."""
         header = ["scenario", "name", "category", "difficulty"] + [
             c.name for c in self.cols
         ]
@@ -240,12 +247,12 @@ class RunState(rx.State):
                 )
             )
         return rx.download(
-            data="\n".join(lines), filename=f"tachikoma-run-{self.run_id}.csv"
+            data="\n".join(lines), filename="tachikoma-benchmark.csv"
         )
 
     @rx.event(background=True)
     async def start_run(self):
-        """Launch a lockstep benchmark run over all enabled models."""
+        """Benchmark the selected target (one model or all active)."""
         config = load_llm_config()
         if config is None:
             yield rx.toast.error(
@@ -253,32 +260,52 @@ class RunState(rx.State):
                 "TACHIKOMA_LLM_API_KEY, then restart."
             )
             return
-        entries = repo.list_models(enabled_only=True)
-        if not entries:
+
+        entries = repo.list_models()
+        if self.target == ALL_MODELS:
+            targets = [e for e in entries if e.is_enabled and e.is_active]
+        else:
+            entry = self._target_entry(entries)
+            targets = [entry] if entry is not None and entry.is_active else []
+        if not targets:
             yield rx.toast.error(
-                "No enabled models. Sync the registry on the Settings page first."
+                "Nothing to run: the selected model is inactive or no active "
+                "models are enabled. Sync the registry on Settings first."
             )
             return
 
-        model_ids = [e.model_id for e in entries]
+        model_ids = [e.model_id for e in targets]
         run_id = repo.create_run(model_ids)
         _STOP_FLAGS[run_id] = False
         async with self:
-            self._refresh_run_options()
-            self._show_run(repo.get_run(run_id))
+            self.run_id = run_id
+            self.run_status = "running"
+            self._run_model_ids = model_ids
+            self._running_cells = []
+            self.done_cells = 0
+            self.total_cells = len(model_ids) * len(SCENARIOS)
+            self._rebuild()
 
         client = LLMClient(config)
         state_ref = self
 
         async def on_event(event: RunEvent):
+            cell_key = f"{event.scenario_key}|{event.model_id}"
             if event.kind == "execution_started":
                 async with state_ref:
-                    state_ref._set_cell(event.scenario_key, event.model_id, "running")
+                    state_ref._running_cells = [
+                        *state_ref._running_cells, cell_key
+                    ]
+                    state_ref._apply_running_cells()
             elif event.kind == "execution_finished" and event.trace is not None:
                 score = score_trace(event.trace)
                 repo.record_execution(run_id, event.trace, score)
                 async with state_ref:
-                    state_ref._load_run(run_id, model_ids)
+                    state_ref._running_cells = [
+                        c for c in state_ref._running_cells if c != cell_key
+                    ]
+                    state_ref.done_cells += 1
+                    state_ref._rebuild()
 
         try:
             completed = await run_benchmark(
@@ -295,52 +322,82 @@ class RunState(rx.State):
         repo.finish_run(run_id, final_status)
         _STOP_FLAGS.pop(run_id, None)
         async with self:
-            self._refresh_run_options()
-            self._show_run(repo.get_run(run_id))
+            self.run_status = final_status
+            self._running_cells = []
+            self._run_model_ids = []
+            self._rebuild()
 
     @rx.event(background=True)
     async def replay_execution(self):
-        """Re-run the selected scenario x model pair as a new attempt."""
+        """Re-run the selected pair as a new attempt in its original run."""
         async with self:
             scenario_key = self.detail.scenario_key
             model_id = self._detail_model_id
-            run_id = self.run_id
-        if not scenario_key or not model_id or not run_id:
+        if not scenario_key or not model_id:
+            return
+        existing = self._latest_for(model_id, scenario_key)
+        if existing is None:
+            yield rx.toast.error("This cell has never been executed.")
             return
         config = load_llm_config()
         if config is None:
             yield rx.toast.error("Endpoint not configured.")
             return
+        cell_key = f"{scenario_key}|{model_id}"
         async with self:
-            self._set_cell(scenario_key, model_id, "running")
+            self._running_cells = [*self._running_cells, cell_key]
+            self._apply_running_cells()
         client = LLMClient(config)
         trace = await execute_scenario(
             client, model_id, SCENARIOS_BY_KEY[scenario_key]
         )
         score = score_trace(trace)
-        repo.record_execution(run_id, trace, score)
-        run = repo.latest_run()
+        repo.record_execution(existing.run_id, trace, score)
         async with self:
-            self._load_run(run_id, run.model_ids if run else [model_id])
+            self._running_cells = [
+                c for c in self._running_cells if c != cell_key
+            ]
+            self._rebuild()
             self._load_detail(scenario_key, model_id)
 
-    _detail_model_id: str = ""
+    @staticmethod
+    def _latest_for(model_id: str, scenario_key: str) -> Execution | None:
+        """Global latest execution for one cell."""
+        for execution in repo.latest_executions_all():
+            if (
+                execution.model_id == model_id
+                and execution.scenario_key == scenario_key
+            ):
+                return execution
+        return None
 
-    def _load_run(self, run_id: int, model_ids: list[str]):
-        """Rebuild all view models from the DB for one run."""
+    def _rebuild(self):
+        """Rebuild the merged matrix, KPIs, and charts from the DB.
+
+        Columns are every model with at least one execution, ordered by when
+        each was first benchmarked (oldest left, newest right), plus any
+        in-flight run participants that have no results yet (appended right).
+        """
+        executions = repo.latest_executions_all()
         registry = {e.model_id: e for e in repo.list_models()}
+
+        first_seen: dict[str, int] = {}
+        for execution in sorted(executions, key=lambda e: e.id):
+            first_seen.setdefault(execution.model_id, execution.id)
+        ordered_ids = sorted(first_seen, key=lambda m: first_seen[m])
+        for model_id in self._run_model_ids:
+            if model_id not in first_seen:
+                ordered_ids.append(model_id)
+
         self.cols = [
             ModelCol(
                 model_id=m,
                 name=registry[m].display_name if m in registry else m,
                 color=registry[m].color if m in registry else "#4ADE80",
             )
-            for m in model_ids
+            for m in ordered_ids
         ]
-        if self.focused_model not in model_ids:
-            self.focused_model = model_ids[0] if model_ids else ""
 
-        executions = repo.latest_executions(run_id)
         by_cell = {(e.model_id, e.scenario_key): e for e in executions}
         self.rows = [
             Row(
@@ -357,18 +414,25 @@ class RunState(rx.State):
                             else "pending"
                         ),
                     )
-                    for m in model_ids
+                    for m in ordered_ids
                 ],
             )
             for s in SCENARIOS
         ]
-        self.done_cells = len(by_cell)
-        self.total_cells = len(SCENARIOS) * len(model_ids)
+        self._apply_running_cells()
+        if not self.is_running:
+            self.done_cells = len(by_cell)
+            self.total_cells = len(ordered_ids) * len(SCENARIOS)
         self._refresh_views(executions)
         self.last_updated = datetime.datetime.now().strftime("%H:%M:%S")
 
-    def _set_cell(self, scenario_key: str, model_id: str, status: str):
-        """Flip one matrix cell status in place (list reassigned for reactivity)."""
+    def _apply_running_cells(self):
+        """Overlay in-flight running markers onto the matrix."""
+        running = set(self._running_cells)
+        if not running and not any(
+            c.status == "running" for r in self.rows for c in r.cells
+        ):
+            return
         self.rows = [
             Row(
                 key=r.key,
@@ -376,9 +440,13 @@ class RunState(rx.State):
                 category=r.category,
                 difficulty=r.difficulty,
                 cells=[
-                    Cell(model_id=c.model_id, status=status)
-                    if r.key == scenario_key and c.model_id == model_id
-                    else c
+                    Cell(model_id=c.model_id, status="running")
+                    if f"{r.key}|{c.model_id}" in running
+                    else (
+                        Cell(model_id=c.model_id, status="pending")
+                        if c.status == "running"
+                        else c
+                    )
                     for c in r.cells
                 ],
             )
@@ -388,25 +456,16 @@ class RunState(rx.State):
     def _refresh_views(self, executions: list[Execution] | None = None):
         """Recompute KPI cards and chart data for the focused model."""
         if executions is None:
-            executions = repo.latest_executions(self.run_id) if self.run_id else []
-        focused_execs = [e for e in executions if e.model_id == self.focused_model]
+            executions = repo.latest_executions_all()
+        focus = self._focus_model_id()
         summaries = [
-            ExecutionSummary(
-                scenario_key=e.scenario_key,
-                points=e.points,
-                error_tags=tuple(e.error_tags),
-                tool_call_count=e.tool_call_count,
-                prompt_tokens=e.prompt_tokens,
-                completion_tokens=e.completion_tokens,
-                latency_ms=e.latency_ms,
-            )
-            for e in focused_execs
+            _summary_of(e) for e in executions if e.model_id == focus
         ]
         agg = aggregate_model(summaries)
         registry = {e.model_id: e for e in repo.list_models()}
-        entry = registry.get(self.focused_model)
+        entry = registry.get(focus)
         self.kpi = Kpi(
-            model_name=entry.display_name if entry else (self.focused_model or "—"),
+            model_name=entry.display_name if entry else (focus or "—"),
             provider=entry.provider or "—" if entry else "—",
             context=entry.context_window or "—" if entry else "—",
             pass_rate=agg.pass_rate,
@@ -423,24 +482,20 @@ class RunState(rx.State):
             invalid_json_rate=f"{agg.invalid_json_rate}%",
             loop_rate=f"{agg.loop_rate}%",
         )
-        self._refresh_charts(executions)
+        self._refresh_charts(executions, focus)
 
-    def _refresh_charts(self, executions: list[Execution]):
+    def _refresh_charts(self, executions: list[Execution], focus: str):
         """Radar, error-breakdown, and token-sparkline data."""
         radar_rows = []
         for letter, label in CATEGORIES.items():
             entry: dict = {"category": label}
             for col in self.cols:
-                col_execs = [
-                    ExecutionSummary(
-                        scenario_key=e.scenario_key,
-                        points=e.points,
-                        error_tags=tuple(e.error_tags),
-                    )
+                col_summaries = [
+                    _summary_of(e)
                     for e in executions
                     if e.model_id == col.model_id
                 ]
-                agg = aggregate_model(col_execs)
+                agg = aggregate_model(col_summaries)
                 entry[col.name] = agg.category_scores.get(letter, 0)
             radar_rows.append(entry)
         self.radar_data = radar_rows
@@ -463,7 +518,7 @@ class RunState(rx.State):
         focused = {
             e.scenario_key: e.total_tokens
             for e in executions
-            if e.model_id == self.focused_model
+            if e.model_id == focus
         }
         self.spark_data = [
             {"scenario": s.key, "tokens": focused.get(s.key, 0)}
@@ -488,15 +543,7 @@ class RunState(rx.State):
             user_prompt=scenario.user_message,
             expected=scenario.expected_behavior,
         )
-        executions = repo.latest_executions(self.run_id) if self.run_id else []
-        execution = next(
-            (
-                e
-                for e in executions
-                if e.model_id == model_id and e.scenario_key == scenario_key
-            ),
-            None,
-        )
+        execution = self._latest_for(model_id, scenario_key)
         if execution is None:
             base.status = "pending"
             base.status_label = "Pending"
