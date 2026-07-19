@@ -159,3 +159,9 @@ def latest_run() -> BenchRun | None:
     """The most recent run, if any."""
     runs = list_runs(limit=1)
     return runs[0] if runs else None
+
+
+def get_run(run_id: int) -> BenchRun | None:
+    """One run by ID."""
+    with rx.session() as session:
+        return session.get(BenchRun, run_id)

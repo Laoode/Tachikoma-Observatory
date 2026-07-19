@@ -52,6 +52,12 @@ ERROR_CHART_COLORS = {
 _STOP_FLAGS: dict[int, bool] = {}
 
 
+def _run_label(run) -> str:
+    """Compact run-history option label, e.g. '#2 · 07-19 20:17 · complete'."""
+    when = run.started_at[5:16].replace("T", " ")
+    return f"#{run.id} · {when} · {run.status}"
+
+
 def _status_of(execution: Execution) -> str:
     """Matrix cell status for a stored execution."""
     if execution.status == "error":
@@ -64,6 +70,9 @@ class RunState(rx.State):
 
     run_status: str = "idle"
     run_id: int = 0
+    run_options: list[str] = []
+    selected_run: str = ""
+    _run_ids: dict[str, int] = {}
     cols: list[ModelCol] = []
     rows: list[Row] = []
     done_cells: int = 0
@@ -138,13 +147,36 @@ class RunState(rx.State):
     @rx.event
     def load_dashboard(self):
         """Page on_load: restore the latest run and ping the endpoint."""
+        self._refresh_run_options()
         run = repo.latest_run()
         if run is not None:
-            self.run_id = run.id
-            self.run_status = "running" if run.status == "running" else run.status
-            self._load_run(run.id, run.model_ids)
+            self._show_run(run)
         self.last_updated = datetime.datetime.now().strftime("%H:%M:%S")
         return RunState.ping_endpoint
+
+    @rx.event
+    def select_run(self, label: str):
+        """Load a historical run into the dashboard (disabled while running)."""
+        if self.is_running:
+            return
+        run = repo.get_run(self._run_ids.get(label, 0))
+        if run is None:
+            return
+        self.detail = Detail()
+        self._show_run(run)
+
+    def _show_run(self, run) -> None:
+        """Point the dashboard at one run."""
+        self.run_id = run.id
+        self.run_status = run.status
+        self.selected_run = _run_label(run)
+        self._load_run(run.id, run.model_ids)
+
+    def _refresh_run_options(self) -> None:
+        """Rebuild the run-history select options, newest first."""
+        runs = repo.list_runs()
+        self._run_ids = {_run_label(r): r.id for r in runs}
+        self.run_options = list(self._run_ids)
 
     @rx.event(background=True)
     async def ping_endpoint(self):
@@ -232,9 +264,8 @@ class RunState(rx.State):
         run_id = repo.create_run(model_ids)
         _STOP_FLAGS[run_id] = False
         async with self:
-            self.run_id = run_id
-            self.run_status = "running"
-            self._load_run(run_id, model_ids)
+            self._refresh_run_options()
+            self._show_run(repo.get_run(run_id))
 
         client = LLMClient(config)
         state_ref = self
@@ -264,8 +295,8 @@ class RunState(rx.State):
         repo.finish_run(run_id, final_status)
         _STOP_FLAGS.pop(run_id, None)
         async with self:
-            self.run_status = final_status
-            self._load_run(run_id, model_ids)
+            self._refresh_run_options()
+            self._show_run(repo.get_run(run_id))
 
     @rx.event(background=True)
     async def replay_execution(self):

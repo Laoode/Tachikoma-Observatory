@@ -178,7 +178,19 @@ def header() -> rx.Component:
         rx.spacer(),
         rx.hstack(
             rx.vstack(
-                rx.text("Current Run", font_size="10px", color=t.TEXT_MUTED),
+                rx.text("Run History", font_size="10px", color=t.TEXT_MUTED),
+                rx.select(
+                    RunState.run_options,
+                    value=RunState.selected_run,
+                    on_change=RunState.select_run,
+                    disabled=RunState.is_running,
+                    size="1",
+                ),
+                spacing="0",
+                align="start",
+            ),
+            rx.vstack(
+                rx.text("Focused Model", font_size="10px", color=t.TEXT_MUTED),
                 rx.select(
                     RunState.focused_options,
                     value=RunState.focused_name,
